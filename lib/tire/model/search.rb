@@ -172,20 +172,45 @@ module Tire
             mapping = instance.class.tire.mapping
             # Reject keys not declared in mapping
             hash = instance.to_hash.reject { |key, value| ! mapping.keys.map(&:to_s).include?(key.to_s) }
+            
+            # Evaluate mappings recursively
+            hash.merge!(evaluate_mappings(mapping, instance)).to_json
+          end
+        end
 
-            # Evalute the `:as` options
-            mapping.each do |key, options|
-              case options[:as]
-                when String
-                  hash[key] = instance.instance_eval(options[:as])
-                when Proc
-                  hash[key] = instance.instance_eval(&options[:as])
-                else
-                  hash[key] = options[:as]
-              end if options[:as]
+        # Evaluates the given mappings on the given object instance. When
+        # it encounters an object, it will evaluate it recursively.
+        #
+        # This way one can define an object mapping several layers deep.
+        #
+        def evaluate_mappings(mapping, instance)
+          if instance.respond_to?(:each) 
+            hash = []
+            instance.each do |obj| 
+              hash << evaluate_mappings(mapping, obj)
             end
+            hash
+          else
+            hash = {}
+            mapping.each do |key, options|
+              if options[:as]
+                case options[:as]
+                  when String
+                    hash[key] = instance.instance_eval(options[:as])
+                  when Proc
+                    hash[key] = instance.instance_eval(&options[:as])
+                  else
+                    hash[key] = options[:as]
+                end
+              elsif instance.respond_to?(key)
+                hash[key] = instance.send(key)
+              end
 
-            hash.to_json
+              if options[:type] == 'object' and options[:properties] and hash[key]
+                hash[key] = evaluate_mappings(options[:properties], hash[key])
+              end
+            end
+            hash
           end
         end
 
